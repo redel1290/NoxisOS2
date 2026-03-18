@@ -176,5 +176,9 @@ class DesktopActivity : AppCompatActivity() {
         loadApps()
     }
 
-    override fun onBackPressed() { /* блокуємо */ }
+    override fun onBackPressed() {
+        if (::desktopView.isInitialized && desktopView.isDrawerOpen()) {
+            desktopView.closeDrawer()
+        }
+    }
 }

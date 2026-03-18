@@ -10,277 +10,434 @@ import android.os.Vibrator
 import android.view.MotionEvent
 import android.view.View
 import android.view.animation.DecelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import com.noxis.os.system.NoxisSettings
 import com.noxis.os.system.SettingsManager
 import com.noxis.os.system.lki.AppInfo
 import com.noxis.os.util.dpToPx
 import kotlin.math.abs
 import kotlin.math.hypot
+import kotlin.math.max
 import kotlin.math.min
 
 class DesktopView(context: Context) : View(context) {
 
     private var settings: NoxisSettings = SettingsManager.get(context)
-    private val apps = mutableListOf<DesktopIcon>()
+    private val desktopApps = mutableListOf<DesktopIcon>()
+    private val allApps = mutableListOf<AppInfo>()
 
-    private val iconSizePx get() = context.dpToPx(settings.iconSize).toFloat()
-    private val cellPaddingPx get() = context.dpToPx(16).toFloat()
-    private val columns get() = settings.gridColumns
+    // Drawer стан
+    private var drawerProgress = 0f   // 0=закрито, 1=відкрито
+    private var drawerAnimator: ValueAnimator? = null
+    private var drawerScrollY = 0f
+    private var drawerMaxScroll = 0f
 
-    // Long press для drag
-    private val LONG_PRESS_MS = 400L
+    // Свайп детекція
+    private var touchStartX = 0f
+    private var touchStartY = 0f
+    private var touchStartDrawerScroll = 0f
+    private var isSwipingUp = false
+    private var isScrollingDrawer = false
+
+    // Drag стан
+    private var dragIcon: DesktopIcon? = null
+    private var dragX = 0f
+    private var dragY = 0f
+    private var dragOffX = 0f
+    private var dragOffY = 0f
+    private var isDragging = false
+    private var dragScale = 1f
+    private val LONG_PRESS_MS = 500L
     private val handler = Handler(Looper.getMainLooper())
     private var longPressRunnable: Runnable? = null
 
-    // Drag стан
-    private var dragging: DesktopIcon? = null
-    private var dragCurrentX = 0f
-    private var dragCurrentY = 0f
-    private var dragOffsetX = 0f
-    private var dragOffsetY = 0f
-    private var isDragging = false
-    private var dragScale = 1f  // анімація підйому
+    private val columns get() = settings.gridColumns
+    private val iconSz get() = context.dpToPx(settings.iconSize).toFloat()
+    private val DRAWER_COLS = 4
 
-    var onAppClick: ((AppInfo) -> Unit)? = null
-
-    // Іконки — унікальні кольори для кожного застосунку
-    private val appColors = mapOf(
+    // Кольори іконок One UI стиль
+    private val iconColors = mapOf(
         "com.noxis.files"    to intArrayOf(0xFF1E88E5.toInt(), 0xFF42A5F5.toInt()),
-        "com.noxis.notes"    to intArrayOf(0xFFF9A825.toInt(), 0xFFFFD54F.toInt()),
-        "com.noxis.browser"  to intArrayOf(0xFF43A047.toInt(), 0xFF66BB6A.toInt()),
-        "com.noxis.terminal" to intArrayOf(0xFF212121.toInt(), 0xFF424242.toInt()),
-        "com.noxis.settings" to intArrayOf(0xFF546E7A.toInt(), 0xFF78909C.toInt())
+        "com.noxis.notes"    to intArrayOf(0xFFFDD835.toInt(), 0xFFFFEE58.toInt()),
+        "com.noxis.browser"  to intArrayOf(0xFF1565C0.toInt(), 0xFF1976D2.toInt()),
+        "com.noxis.terminal" to intArrayOf(0xFF263238.toInt(), 0xFF37474F.toInt()),
+        "com.noxis.settings" to intArrayOf(0xFF757575.toInt(), 0xFF9E9E9E.toInt())
     )
-    private val appSymbols = mapOf(
-        "com.noxis.files"    to "📁",
-        "com.noxis.notes"    to "📝",
-        "com.noxis.browser"  to "🌐",
+    private val iconSymbols = mapOf(
+        "com.noxis.files"    to "Files",
+        "com.noxis.notes"    to "Notes",
+        "com.noxis.browser"  to "Web",
         "com.noxis.terminal" to ">_",
-        "com.noxis.settings" to "⚙"
+        "com.noxis.settings" to "Set"
     )
 
+    // Пейнти
+    private val wallpaperPaint = Paint()
+    private val drawerBgPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val iconBgPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val iconGlossPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#60000000")
-        maskFilter = BlurMaskFilter(16f, BlurMaskFilter.Blur.NORMAL)
+        maskFilter = BlurMaskFilter(12f, BlurMaskFilter.Blur.NORMAL)
     }
     private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         textAlign = Paint.Align.CENTER
-        setShadowLayer(4f, 0f, 1f, Color.parseColor("#AA000000"))
+        setShadowLayer(3f, 0f, 1f, Color.parseColor("#99000000"))
     }
     private val symbolPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         textAlign = Paint.Align.CENTER
         isFakeBoldText = true
     }
-    private val dragBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#AA7B5EA7")
-        style = Paint.Style.STROKE
-        strokeWidth = 2f
+    private val drawerHandlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#55FFFFFF")
+        style = Paint.Style.FILL
+    }
+    private val drawerLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textAlign = Paint.Align.CENTER
+    }
+    private val snapPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#557B5EA7")
+        style = Paint.Style.FILL
     }
 
+    var onAppClick: ((AppInfo) -> Unit)? = null
+
     fun reload(appList: List<AppInfo>) {
-        apps.clear()
+        allApps.clear()
+        allApps.addAll(appList)
+        desktopApps.clear()
         appList.forEachIndexed { i, app ->
             val col = i % columns
             val row = i / columns
             val (x, y) = cellToPixel(col, row)
-            apps.add(DesktopIcon(app, col, row, x, y))
+            desktopApps.add(DesktopIcon(app, col, row, x, y))
         }
         invalidate()
     }
 
     fun reloadSettings() {
         settings = SettingsManager.get(context)
-        // Перерахувати позиції
-        apps.forEachIndexed { i, icon ->
-            icon.col = i % columns
-            icon.row = i / columns
+        desktopApps.forEachIndexed { i, icon ->
+            icon.col = i % columns; icon.row = i / columns
             val (x, y) = cellToPixel(icon.col, icon.row)
-            icon.drawX = x
-            icon.drawY = y
+            icon.drawX = x; icon.drawY = y
         }
         invalidate()
     }
 
+    // ── Позиції ──────────────────────────────────────────────
+
     private fun cellToPixel(col: Int, row: Int): Pair<Float, Float> {
         if (width == 0) return 0f to 0f
         val cellW = width.toFloat() / columns
-        val x = col * cellW + (cellW - iconSizePx) / 2f
-        val y = row * (iconSizePx + cellPaddingPx + context.dpToPx(18)) + cellPaddingPx
+        val cellH = iconSz + context.dpToPx(32)
+        val x = col * cellW + (cellW - iconSz) / 2f
+        val y = row * cellH + context.dpToPx(24)
         return x to y
     }
 
     private fun pixelToCell(x: Float, y: Float): Pair<Int, Int> {
         if (width == 0) return 0 to 0
         val cellW = width.toFloat() / columns
-        val cellH = iconSizePx + cellPaddingPx + context.dpToPx(18)
-        val col = (x / cellW).toInt().coerceIn(0, columns - 1)
-        val row = (y / cellH).toInt().coerceAtLeast(0)
-        return col to row
+        val cellH = iconSz + context.dpToPx(32)
+        return (x / cellW).toInt().coerceIn(0, columns - 1) to
+               max(0, (y / cellH).toInt())
+    }
+
+    private fun drawerCellToPixel(col: Int, row: Int): Pair<Float, Float> {
+        if (width == 0) return 0f to 0f
+        val cellW = width.toFloat() / DRAWER_COLS
+        val drawerIconSz = context.dpToPx(56).toFloat()
+        val cellH = drawerIconSz + context.dpToPx(36)
+        val x = col * cellW + (cellW - drawerIconSz) / 2f
+        val y = context.dpToPx(80) + row * cellH - drawerScrollY
+        return x to y
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        // Перерахувати позиції після зміни розміру
-        apps.forEachIndexed { i, icon ->
-            icon.col = i % columns
-            icon.row = i / columns
+        desktopApps.forEachIndexed { i, icon ->
+            icon.col = i % columns; icon.row = i / columns
             val (x, y) = cellToPixel(icon.col, icon.row)
-            icon.drawX = x
-            icon.drawY = y
+            icon.drawX = x; icon.drawY = y
         }
     }
+
+    // ── Draw ─────────────────────────────────────────────────
 
     override fun onDraw(canvas: Canvas) {
-        apps.forEach { icon ->
-            if (icon == dragging && isDragging) return@forEach
-            drawIcon(canvas, icon, icon.drawX, icon.drawY, 1f)
+        // Фон
+        canvas.drawColor(Color.parseColor("#0D0D0F"))
+
+        // Робочий стіл
+        drawDesktop(canvas)
+
+        // Drawer поверх
+        if (drawerProgress > 0f) {
+            drawDrawer(canvas)
         }
 
-        // Drag: snap preview
-        if (isDragging && dragging != null) {
-            val (sc, sr) = pixelToCell(dragCurrentX, dragCurrentY)
+        // Drag preview
+        if (isDragging && dragIcon != null) {
+            val (sc, sr) = pixelToCell(dragX, dragY)
             val (sx, sy) = cellToPixel(sc, sr)
-            val size = iconSizePx
-            val r = size * 0.22f
-            val rect = RectF(sx, sy, sx + size, sy + size)
-            canvas.drawRoundRect(rect, r, r, dragBorderPaint)
-
-            // Іконка слідує за пальцем з підйомом
-            val drawX = dragCurrentX - dragOffsetX
-            val drawY = dragCurrentY - dragOffsetY
-            drawIcon(canvas, dragging!!, drawX, drawY, dragScale)
+            canvas.drawRoundRect(
+                RectF(sx, sy, sx + iconSz, sy + iconSz),
+                iconSz * 0.22f, iconSz * 0.22f, snapPaint
+            )
+            drawIcon(canvas, dragIcon!!, dragX - dragOffX, dragY - dragOffY, dragScale,
+                     iconSz, labelPaint, symbolPaint)
         }
     }
 
-    private fun drawIcon(canvas: Canvas, icon: DesktopIcon, x: Float, y: Float, scale: Float) {
-        val size = iconSizePx
+    private fun drawDesktop(canvas: Canvas) {
+        desktopApps.forEach { icon ->
+            if (icon == dragIcon && isDragging) return@forEach
+            drawIcon(canvas, icon, icon.drawX, icon.drawY, 1f, iconSz, labelPaint, symbolPaint)
+        }
+    }
+
+    private fun drawDrawer(canvas: Canvas) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val drawerTop = h * (1f - drawerProgress)
+
+        // Фон drawer — темне скло One UI стиль
+        val alpha = (drawerProgress * 245).toInt().coerceIn(0, 245)
+        drawerBgPaint.color = Color.argb(alpha, 18, 18, 24)
+        canvas.drawRect(0f, drawerTop, w, h, drawerBgPaint)
+
+        // Handle зверху
+        val handleW = context.dpToPx(40).toFloat()
+        val handleH = context.dpToPx(4).toFloat()
+        canvas.drawRoundRect(
+            RectF(w / 2f - handleW / 2f, drawerTop + context.dpToPx(10),
+                  w / 2f + handleW / 2f, drawerTop + context.dpToPx(10) + handleH),
+            handleH / 2f, handleH / 2f, drawerHandlePaint
+        )
+
+        // Заголовок "Всі застосунки"
+        drawerLabelPaint.textSize = context.dpToPx(13).toFloat()
+        drawerLabelPaint.color = Color.parseColor("#88FFFFFF")
+        if (drawerProgress > 0.3f) {
+            canvas.drawText(
+                "Всі застосунки",
+                w / 2f,
+                drawerTop + context.dpToPx(44),
+                drawerLabelPaint
+            )
+        }
+
+        // Іконки застосунків
+        val drawerIconSz = context.dpToPx(56).toFloat()
+        val drawerSymPaint = Paint(symbolPaint).apply { textSize = drawerIconSz * 0.36f }
+        val drawerLblPaint = Paint(labelPaint).apply {
+            textSize = context.dpToPx(11).toFloat()
+        }
+
+        canvas.save()
+        canvas.clipRect(0f, drawerTop, w, h)
+
+        allApps.forEachIndexed { i, app ->
+            val col = i % DRAWER_COLS
+            val row = i / DRAWER_COLS
+            val (x, y) = drawerCellToPixel(col, row)
+            val absY = drawerTop + (y - context.dpToPx(80) + drawerScrollY) *
+                       drawerProgress + context.dpToPx(80) * drawerProgress -
+                       drawerScrollY * drawerProgress
+
+            // Спрощено: малюємо відносно drawerTop
+            val realY = drawerTop + context.dpToPx(80) +
+                        row * (drawerIconSz + context.dpToPx(36)) - drawerScrollY
+
+            if (realY + drawerIconSz + context.dpToPx(36) < drawerTop) return@forEachIndexed
+            if (realY > height.toFloat()) return@forEachIndexed
+
+            val fakeIcon = DesktopIcon(app, col, row, x, realY)
+            drawIcon(canvas, fakeIcon, x, realY, 1f, drawerIconSz, drawerLblPaint, drawerSymPaint)
+        }
+
+        canvas.restore()
+
+        // Обчислити макс скрол
+        val rows = (allApps.size + DRAWER_COLS - 1) / DRAWER_COLS
+        val drawerIconSz2 = context.dpToPx(56).toFloat()
+        val totalH = rows * (drawerIconSz2 + context.dpToPx(36)) + context.dpToPx(80).toFloat()
+        drawerMaxScroll = max(0f, totalH - (h - drawerTop))
+    }
+
+    private fun drawIcon(
+        canvas: Canvas, icon: DesktopIcon,
+        x: Float, y: Float, scale: Float,
+        size: Float,
+        lPaint: Paint, sPaint: Paint
+    ) {
         val cx = x + size / 2f
         val cy = y + size / 2f
-        val scaledSize = size * scale
-        val left = cx - scaledSize / 2f
-        val top = cy - scaledSize / 2f
-        val right = cx + scaledSize / 2f
-        val bottom = cy + scaledSize / 2f
-        val rect = RectF(left, top, right, bottom)
-        val r = scaledSize * 0.22f
+        val s = size * scale
+        val left = cx - s / 2f
+        val top = cy - s / 2f
+        val rect = RectF(left, top, left + s, top + s)
+        val r = s * 0.22f  // One UI радіус заокруглення
 
-        // Кастомна іконка
         if (icon.app.icon != null) {
-            val bmpPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-            canvas.drawBitmap(icon.app.icon, null, rect, bmpPaint)
+            val p = Paint(Paint.ANTI_ALIAS_FLAG)
+            val path = Path().apply { addRoundRect(rect, r, r, Path.Direction.CW) }
+            canvas.save()
+            canvas.clipPath(path)
+            canvas.drawBitmap(icon.app.icon, null, rect, p)
+            canvas.restore()
         } else {
-            drawGeneratedIcon(canvas, icon, rect, r, scale)
+            // Тінь
+            if (scale <= 1.05f) {
+                shadowPaint.color = Color.argb(60, 0, 0, 0)
+                canvas.drawRoundRect(
+                    RectF(left + 2, top + 4, left + s + 2, top + s + 4),
+                    r, r, shadowPaint
+                )
+            }
+
+            // Градієнт фон
+            val colors = getIconColors(icon.app.id)
+            val gradient = LinearGradient(
+                left, top, left + s, top + s,
+                colors[0], colors[1], Shader.TileMode.CLAMP
+            )
+            iconBgPaint.shader = gradient
+            canvas.drawRoundRect(rect, r, r, iconBgPaint)
+
+            // Блик (One UI стиль — легкий зверху)
+            val gloss = LinearGradient(
+                left, top, left, top + s * 0.4f,
+                Color.argb(50, 255, 255, 255),
+                Color.TRANSPARENT, Shader.TileMode.CLAMP
+            )
+            iconGlossPaint.shader = gloss
+            canvas.drawRoundRect(rect, r, r, iconGlossPaint)
+
+            // Символ
+            val sym = iconSymbols[icon.app.id] ?: icon.app.name.take(3)
+            sPaint.textSize = s * 0.32f
+            sPaint.color = Color.WHITE
+            canvas.drawText(sym, cx, cy + sPaint.textSize * 0.35f, sPaint)
         }
 
         // Назва
         if (settings.iconLabelVisible) {
-            labelPaint.textSize = context.dpToPx(10).toFloat()
-            canvas.drawText(
-                icon.app.name,
-                cx,
-                bottom + context.dpToPx(14),
-                labelPaint
+            lPaint.textSize = context.dpToPx(11).toFloat()
+            lPaint.color = Color.WHITE
+            canvas.drawText(icon.app.name, cx, top + s + context.dpToPx(16), lPaint)
+        }
+    }
+
+    private fun getIconColors(id: String): IntArray {
+        return iconColors[id] ?: run {
+            val h = (abs(id.hashCode()) % 360).toFloat()
+            intArrayOf(
+                Color.HSVToColor(floatArrayOf(h, 0.75f, 0.75f)),
+                Color.HSVToColor(floatArrayOf((h + 25) % 360, 0.55f, 0.92f))
             )
         }
     }
 
-    private fun drawGeneratedIcon(canvas: Canvas, icon: DesktopIcon, rect: RectF, r: Float, scale: Float) {
-        val colors = appColors[icon.app.id]
-            ?: generateColors(icon.app.id)
-
-        // Тінь (тільки без drag scale щоб не виглядало дивно)
-        if (scale == 1f) {
-            val shadowRect = RectF(rect.left + 3, rect.top + 6, rect.right + 3, rect.bottom + 6)
-            canvas.drawRoundRect(shadowRect, r, r, shadowPaint)
-        }
-
-        // Градієнтний фон
-        val gradient = LinearGradient(
-            rect.left, rect.top, rect.right, rect.bottom,
-            colors[0], colors[1], Shader.TileMode.CLAMP
-        )
-        val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            shader = gradient
-            style = Paint.Style.FILL
-        }
-        canvas.drawRoundRect(rect, r, r, bgPaint)
-
-        // Легкий блик зверху
-        val gloss = LinearGradient(
-            rect.left, rect.top, rect.left, rect.top + rect.height() * 0.5f,
-            Color.argb(60, 255, 255, 255), Color.TRANSPARENT, Shader.TileMode.CLAMP
-        )
-        val glossPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            shader = gloss
-            style = Paint.Style.FILL
-        }
-        canvas.drawRoundRect(rect, r, r, glossPaint)
-
-        // Символ
-        val symbol = appSymbols[icon.app.id] ?: icon.app.name.take(2)
-        symbolPaint.textSize = rect.width() * 0.38f
-        canvas.drawText(
-            symbol,
-            rect.centerX(),
-            rect.centerY() + symbolPaint.textSize * 0.35f,
-            symbolPaint
-        )
-    }
-
-    private fun generateColors(appId: String): IntArray {
-        // Детермінований колір з id
-        val hash = appId.hashCode()
-        val hue = (Math.abs(hash) % 360).toFloat()
-        val color1 = Color.HSVToColor(floatArrayOf(hue, 0.7f, 0.8f))
-        val color2 = Color.HSVToColor(floatArrayOf((hue + 30) % 360, 0.5f, 0.95f))
-        return intArrayOf(color1, color2)
-    }
+    // ── Touch ────────────────────────────────────────────────
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                val icon = findIconAt(event.x, event.y)
-                if (icon != null) {
-                    // Запускаємо long press таймер
-                    longPressRunnable = Runnable {
-                        startDrag(icon, event.x, event.y)
+                touchStartX = event.x
+                touchStartY = event.y
+                touchStartDrawerScroll = drawerScrollY
+                isSwipingUp = false
+                isScrollingDrawer = false
+
+                if (drawerProgress < 0.5f) {
+                    // Десктоп — long press для drag
+                    val icon = findDesktopIconAt(event.x, event.y)
+                    if (icon != null) {
+                        longPressRunnable = Runnable { startDrag(icon, event.x, event.y) }
+                        handler.postDelayed(longPressRunnable!!, LONG_PRESS_MS)
                     }
-                    handler.postDelayed(longPressRunnable!!, LONG_PRESS_MS)
                 }
                 return true
             }
+
             MotionEvent.ACTION_MOVE -> {
-                if (isDragging && dragging != null) {
-                    dragCurrentX = event.x
-                    dragCurrentY = event.y
-                    invalidate()
-                } else {
-                    // Якщо рухнули до long press — скасовуємо
-                    val dx = abs(event.x - (dragging?.drawX ?: event.x))
-                    val dy = abs(event.y - (dragging?.drawY ?: event.y))
-                    if (hypot(dx, dy) > context.dpToPx(8)) {
-                        cancelDragLongPress()
+                val dx = event.x - touchStartX
+                val dy = event.y - touchStartY
+
+                if (isDragging && dragIcon != null) {
+                    dragX = event.x; dragY = event.y; invalidate()
+                    return true
+                }
+
+                if (!isSwipingUp && !isScrollingDrawer && abs(dy) > context.dpToPx(8)) {
+                    cancelDrag()
+                    if (drawerProgress > 0.5f && dy > 0) {
+                        // Скрол вниз в drawer — може бути закриття
+                        isSwipingUp = true
+                    } else if (dy < -context.dpToPx(8)) {
+                        isSwipingUp = true
+                    } else if (drawerProgress > 0.5f) {
+                        isScrollingDrawer = true
                     }
                 }
-                return true
-            }
-            MotionEvent.ACTION_UP -> {
-                if (isDragging && dragging != null) {
-                    dropIcon(dragging!!, dragCurrentX, dragCurrentY)
-                } else {
-                    cancelDragLongPress()
-                    // Звичайний тап
-                    val icon = findIconAt(event.x, event.y)
-                    icon?.let { onAppClick?.invoke(it.app) }
+
+                if (isSwipingUp) {
+                    val swipeProg = -dy / height.toFloat()
+                    val newProg = (drawerProgress + swipeProg * 2f).coerceIn(0f, 1f)
+                    drawerProgress = newProg
+                    invalidate()
+                }
+
+                if (isScrollingDrawer && drawerProgress > 0.9f) {
+                    drawerScrollY = (touchStartDrawerScroll - dy).coerceIn(0f, drawerMaxScroll)
+                    invalidate()
                 }
                 return true
             }
-            MotionEvent.ACTION_CANCEL -> {
-                cancelDragLongPress()
-                if (isDragging) dropIcon(dragging!!, dragging!!.drawX, dragging!!.drawY)
+
+            MotionEvent.ACTION_UP -> {
+                cancelDrag()
+
+                if (isDragging && dragIcon != null) {
+                    dropIcon(dragIcon!!, dragX, dragY)
+                    return true
+                }
+
+                val dy = event.y - touchStartY
+                val dx = event.x - touchStartX
+
+                if (isSwipingUp) {
+                    // Snap to open/close
+                    val target = if (drawerProgress > 0.4f) 1f else 0f
+                    animateDrawer(target)
+                } else if (!isDragging && abs(dx) < context.dpToPx(8) && abs(dy) < context.dpToPx(8)) {
+                    // Тап
+                    if (drawerProgress > 0.5f) {
+                        // Тап в drawer
+                        val icon = findDrawerIconAt(event.x, event.y)
+                        icon?.let { onAppClick?.invoke(it) }
+                    } else {
+                        val icon = findDesktopIconAt(event.x, event.y)
+                        icon?.let { onAppClick?.invoke(it.app) }
+                    }
+                }
+
+                isDragging = false
+                dragIcon = null
+                dragScale = 1f
+                invalidate()
                 return true
+            }
+
+            MotionEvent.ACTION_CANCEL -> {
+                cancelDrag()
+                if (isDragging && dragIcon != null) dropIcon(dragIcon!!, dragIcon!!.drawX, dragIcon!!.drawY)
+                isDragging = false; dragIcon = null; dragScale = 1f
+                invalidate()
             }
         }
         return false
@@ -288,20 +445,15 @@ class DesktopView(context: Context) : View(context) {
 
     private fun startDrag(icon: DesktopIcon, x: Float, y: Float) {
         isDragging = true
-        dragging = icon
-        dragCurrentX = x
-        dragCurrentY = y
-        dragOffsetX = x - icon.drawX
-        dragOffsetY = y - icon.drawY
-
-        // Вібрація
+        dragIcon = icon
+        dragX = x; dragY = y
+        dragOffX = x - icon.drawX
+        dragOffY = y - icon.drawY
         try {
-            val v = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-            v.vibrate(VibrationEffect.createOneShot(40, VibrationEffect.DEFAULT_AMPLITUDE))
+            (context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator)
+                .vibrate(VibrationEffect.createOneShot(45, VibrationEffect.DEFAULT_AMPLITUDE))
         } catch (e: Exception) {}
-
-        // Анімація підйому (scale 1.0 → 1.15)
-        ValueAnimator.ofFloat(1f, 1.15f).apply {
+        ValueAnimator.ofFloat(1f, 1.18f).apply {
             duration = 150
             interpolator = DecelerateInterpolator()
             addUpdateListener { dragScale = it.animatedValue as Float; invalidate() }
@@ -310,61 +462,82 @@ class DesktopView(context: Context) : View(context) {
     }
 
     private fun dropIcon(icon: DesktopIcon, x: Float, y: Float) {
-        val (newCol, newRow) = pixelToCell(x, y)
-
-        // Swap якщо зайнято
-        val target = apps.find { it != icon && it.col == newCol && it.row == newRow }
+        val (nc, nr) = pixelToCell(x, y)
+        val target = desktopApps.find { it != icon && it.col == nc && it.row == nr }
         if (target != null) {
-            target.col = icon.col; target.row = icon.row
-            val (ox, oy) = cellToPixel(icon.col, icon.row)
+            val oc = icon.col; val or = icon.row
+            target.col = oc; target.row = or
+            val (ox, oy) = cellToPixel(oc, or)
             target.drawX = ox; target.drawY = oy
         }
-
-        icon.col = newCol; icon.row = newRow
-        val (nx, ny) = cellToPixel(newCol, newRow)
-
-        // Анімація посадки
-        ValueAnimator.ofFloat(dragScale, 1f).apply {
-            duration = 120
-            addUpdateListener {
-                dragScale = it.animatedValue as Float
-                invalidate()
-            }
-            start()
-        }
-
-        // Анімація до snap позиції
-        val startX = dragCurrentX - dragOffsetX
-        val startY = dragCurrentY - dragOffsetY
+        icon.col = nc; icon.row = nr
+        val (nx, ny) = cellToPixel(nc, nr)
+        val fromX = x - dragOffX; val fromY = y - dragOffY
         ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 150
-            interpolator = DecelerateInterpolator()
+            duration = 200
+            interpolator = OvershootInterpolator(1.5f)
             addUpdateListener { anim ->
                 val t = anim.animatedValue as Float
-                icon.drawX = startX + (nx - startX) * t
-                icon.drawY = startY + (ny - startY) * t
+                icon.drawX = fromX + (nx - fromX) * t
+                icon.drawY = fromY + (ny - fromY) * t
+                dragScale = dragScale + (1f - dragScale) * t
                 invalidate()
             }
-            doOnEnd {
-                icon.drawX = nx; icon.drawY = ny
-                isDragging = false; dragging = null; dragScale = 1f
-                invalidate()
-            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(a: android.animation.Animator) {
+                    icon.drawX = nx; icon.drawY = ny
+                    isDragging = false; dragIcon = null; dragScale = 1f
+                    invalidate()
+                }
+            })
             start()
         }
     }
 
-    private fun cancelDragLongPress() {
+    private fun cancelDrag() {
         longPressRunnable?.let { handler.removeCallbacks(it) }
         longPressRunnable = null
     }
 
-    private fun findIconAt(x: Float, y: Float): DesktopIcon? {
-        val size = iconSizePx
-        return apps.firstOrNull { icon ->
-            x >= icon.drawX && x <= icon.drawX + size &&
-            y >= icon.drawY && y <= icon.drawY + size
+    private fun animateDrawer(target: Float) {
+        drawerAnimator?.cancel()
+        drawerAnimator = ValueAnimator.ofFloat(drawerProgress, target).apply {
+            duration = 350
+            interpolator = DecelerateInterpolator(2f)
+            addUpdateListener { drawerProgress = it.animatedValue as Float; invalidate() }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(a: android.animation.Animator) {
+                    if (target == 0f) drawerScrollY = 0f
+                }
+            })
+            start()
         }
+    }
+
+    fun closeDrawer() { if (drawerProgress > 0f) animateDrawer(0f) }
+    fun isDrawerOpen() = drawerProgress > 0.5f
+
+    private fun findDesktopIconAt(x: Float, y: Float): DesktopIcon? {
+        val s = iconSz
+        return desktopApps.firstOrNull { ic ->
+            x >= ic.drawX && x <= ic.drawX + s && y >= ic.drawY && y <= ic.drawY + s
+        }
+    }
+
+    private fun findDrawerIconAt(x: Float, y: Float): AppInfo? {
+        val drawerIconSz = context.dpToPx(56).toFloat()
+        val drawerTop = height * (1f - drawerProgress)
+        allApps.forEachIndexed { i, app ->
+            val col = i % DRAWER_COLS
+            val row = i / DRAWER_COLS
+            val realY = drawerTop + context.dpToPx(80) +
+                        row * (drawerIconSz + context.dpToPx(36)) - drawerScrollY
+            val cellW = width.toFloat() / DRAWER_COLS
+            val iconX = col * cellW + (cellW - drawerIconSz) / 2f
+            if (x >= iconX && x <= iconX + drawerIconSz &&
+                y >= realY && y <= realY + drawerIconSz) return app
+        }
+        return null
     }
 
     data class DesktopIcon(
@@ -372,11 +545,4 @@ class DesktopView(context: Context) : View(context) {
         var col: Int, var row: Int,
         var drawX: Float, var drawY: Float
     )
-}
-
-// Extension для ValueAnimator
-private fun ValueAnimator.doOnEnd(action: () -> Unit) {
-    addListener(object : android.animation.AnimatorListenerAdapter() {
-        override fun onAnimationEnd(animation: android.animation.Animator) = action()
-    })
 }
