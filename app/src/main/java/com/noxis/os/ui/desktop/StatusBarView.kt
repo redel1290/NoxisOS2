@@ -64,7 +64,7 @@ class StatusBarView(context: Context) : FrameLayout(context) {
         }
 
         // Центр — годинник
-        clockView = TextView(context).apply {
+        clockView.apply {
             setTextColor(Color.parseColor("#F0F0F5"))
             textSize = 12f
             gravity = Gravity.CENTER
@@ -72,7 +72,7 @@ class StatusBarView(context: Context) : FrameLayout(context) {
         }
 
         // Право — батарея
-        batteryView = TextView(context).apply {
+        batteryView.apply {
             setTextColor(Color.parseColor("#8A8A9A"))
             textSize = 11f
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
