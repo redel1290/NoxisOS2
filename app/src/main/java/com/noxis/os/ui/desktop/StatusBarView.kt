@@ -23,8 +23,8 @@ class StatusBarView(context: Context) : FrameLayout(context) {
     private val clockFmt = SimpleDateFormat("HH:mm", Locale.getDefault())
     private val handler = Handler(Looper.getMainLooper())
 
-    private val clockView: TextView
-    private val batteryView: TextView
+    private val clockView: TextView = TextView(context)
+    private val batteryView: TextView = TextView(context)
 
     private val clockRunnable = object : Runnable {
         override fun run() {
