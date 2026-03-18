@@ -1,9 +1,9 @@
 package com.noxis.os.ui.desktop
 
 import android.Manifest
+import android.app.ActivityManager
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -15,9 +15,6 @@ import android.widget.FrameLayout
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import com.noxis.os.system.KernelManager
 import com.noxis.os.system.SettingsManager
 import com.noxis.os.system.lki.AppInfo
@@ -34,77 +31,79 @@ class DesktopActivity : AppCompatActivity() {
     private lateinit var statusBar: StatusBarView
     private lateinit var navbar: NavbarView
 
-    private val STATUSBAR_H get() = dpToPx(28)
-    private val NAVBAR_H get() = dpToPx(56)
+    private val STATUSBAR_H get() = dpToPx(24)
+    private val NAVBAR_H get() = dpToPx(52)
     private val REQ_PERM = 100
     private val REQ_STORAGE = 101
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Ініціалізація ядра при першому запуску
         KernelManager.get(this)
-        setupEdgeToEdge()
+
+        setupFullscreen()
         buildUI()
         requestPermissions()
     }
 
-    private fun setupEdgeToEdge() {
-        // Ховаємо системний навбар і статус бар Android повністю
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        window.statusBarColor = Color.TRANSPARENT
-        window.navigationBarColor = Color.TRANSPARENT
-
-        val controller = WindowInsetsControllerCompat(window, window.decorView)
-        controller.hide(WindowInsetsCompat.Type.systemBars())
-        controller.systemBarsBehavior =
-            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-
+    private fun setupFullscreen() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.setDecorFitsSystemWindows(false)
+        } else {
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = (
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+            )
+        }
     }
 
     private fun buildUI() {
         val settings = SettingsManager.get(this)
 
         root = FrameLayout(this)
-        root.setBackgroundColor(Color.parseColor("#0D0D0F"))
+        root.setBackgroundColor(android.graphics.Color.parseColor("#0D0D0F"))
 
+        // Статус бар
+        statusBar = StatusBarView(this)
+
+        // Робочий стіл (між статус баром і навбаром)
         desktopView = DesktopView(this)
         desktopView.onAppClick = { app -> openApp(app) }
 
-        statusBar = StatusBarView(this)
-        navbar = NavbarView(this).apply {
-            onBack = { /* на десктопі нічого */ }
-            onHome = { /* вже тут */ }
-            onRecent = { }
-        }
+        // Навбар
+        navbar = NavbarView(this)
+        navbar.onBack = { onBackPressed() }
+        navbar.onHome = { /* вже на головному */ }
+        navbar.onRecent = { openRecents() }
 
-        // Десктоп займає весь екран
         root.addView(desktopView, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.MATCH_PARENT
         ).also {
-            it.topMargin = STATUSBAR_H
-            it.bottomMargin = NAVBAR_H
+            it.topMargin = if (settings.statusbarVisible) STATUSBAR_H else 0
+            it.bottomMargin = if (settings.navbarVisible) NAVBAR_H else 0
         })
 
-        // Статус бар зверху
-        root.addView(statusBar, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT, STATUSBAR_H,
-            android.view.Gravity.TOP
-        ))
+        if (settings.statusbarVisible) {
+            root.addView(statusBar, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, STATUSBAR_H,
+                android.view.Gravity.TOP
+            ))
+        }
 
-        // Навбар знизу
-        root.addView(navbar, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT, NAVBAR_H,
-            android.view.Gravity.BOTTOM
-        ))
+        if (settings.navbarVisible) {
+            root.addView(navbar, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, NAVBAR_H,
+                android.view.Gravity.BOTTOM
+            ))
+        }
 
         setContentView(root)
-    }
-
-    private fun rebuildUI() {
-        root.removeAllViews()
-        buildUI()
-        loadApps()
     }
 
     private fun openApp(app: AppInfo) {
@@ -121,31 +120,34 @@ class DesktopActivity : AppCompatActivity() {
         }
         startActivity(intent)
         if (SettingsManager.get(this).animations) {
-            overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+            overridePendingTransition(
+                android.R.anim.fade_in,
+                android.R.anim.fade_out
+            )
         }
+    }
+
+    private fun openRecents() {
+        // TODO: RecentsActivity — список останніх застосунків
+        val am = getSystemService(ACTIVITY_SERVICE) as ActivityManager
+        // Placeholder
     }
 
     private fun loadApps() {
         SystemPaths.initExternalDirs()
-        desktopView.reload(AppRegistry.getAll(this))
-    }
-
-    override fun onResume() {
-        super.onResume()
-        // Повторно ховаємо системний UI (може відновитися після свайпу)
-        val controller = WindowInsetsControllerCompat(window, window.decorView)
-        controller.hide(WindowInsetsCompat.Type.systemBars())
-        // Повне перебудування щоб налаштування вигляду застосувались
-        rebuildUI()
+        val apps = AppRegistry.getAll(this)
+        desktopView.reload(apps)
     }
 
     // --- Дозволи ---
+
     private fun requestPermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             if (!Environment.isExternalStorageManager()) {
                 startActivityForResult(
                     Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                        Uri.parse("package:$packageName")), REQ_STORAGE
+                        Uri.parse("package:$packageName")),
+                    REQ_STORAGE
                 )
             } else onPermissionsGranted()
         } else {
@@ -176,5 +178,14 @@ class DesktopActivity : AppCompatActivity() {
         loadApps()
     }
 
-    override fun onBackPressed() { /* блокуємо */ }
+    override fun onResume() {
+        super.onResume()
+        // Оновити якщо повернулись з налаштувань
+        desktopView.reloadSettings()
+        loadApps()
+    }
+
+    override fun onBackPressed() {
+        // На робочому столі Back нічого не робить
+    }
 }

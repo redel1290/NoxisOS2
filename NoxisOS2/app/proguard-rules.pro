@@ -1,0 +1,9 @@
+-keep class org.luaj.** { *; }
+-dontwarn org.luaj.**
+-keep class com.noxis.os.system.lki.LkiManifest { *; }
+-keep class com.noxis.os.system.NoxisSettings { *; }
+-keep class com.noxis.os.system.KernelInfo { *; }
+-keep class com.noxis.os.system.FirmwareManifest { *; }
+-keepattributes Signature
+-keepattributes *Annotation*
+-dontwarn com.google.gson.**

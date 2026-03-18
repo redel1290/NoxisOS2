@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Noxis OS</string>
+    <string name="settings">Налаштування</string>
+    <string name="about_os">Про OS</string>
+    <string name="file_manager">Файловий менеджер</string>
+    <string name="back">Назад</string>
+    <string name="home">Додому</string>
+    <string name="recent">Останні</string>
+    <string name="ok">OK</string>
+    <string name="cancel">Скасувати</string>
+    <string name="confirm">Підтвердити</string>
+    <string name="warning">Увага</string>
+    <string name="install">Встановити</string>
+    <string name="uninstall">Видалити</string>
+
+    <!-- Bootloader -->
+    <string name="bootloader_unlock_title">Розблокування завантажувача</string>
+    <string name="bootloader_unlock_warning">Ця дія незворотна. Статус системи зміниться на «Неофіційний» назавжди. Продовжити?</string>
+    <string name="bootloader_unlocked">Розблоковано</string>
+    <string name="bootloader_locked">Заблоковано</string>
+    <string name="status_official">Офіційний</string>
+    <string name="status_unofficial">Неофіційний</string>
+</resources>

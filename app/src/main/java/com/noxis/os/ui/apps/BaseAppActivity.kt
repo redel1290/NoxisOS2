@@ -7,90 +7,86 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.noxis.os.system.SettingsManager
 import com.noxis.os.ui.desktop.NavbarView
 import com.noxis.os.ui.desktop.StatusBarView
 import com.noxis.os.util.dpToPx
 
-/**
- * Базова активність для всіх вбудованих застосунків.
- * Автоматично додає статус бар і навбар.
- * Підкласи розміщують свій UI в contentRoot.
- */
 abstract class BaseAppActivity : AppCompatActivity() {
 
     protected lateinit var contentRoot: FrameLayout
-    private lateinit var titleView: TextView
+    private lateinit var titleTextView: TextView
 
     protected abstract val appTitle: String
     protected open val showTitle: Boolean = true
 
+    private val STATUSBAR_H get() = dpToPx(28)
+    private val NAVBAR_H get() = dpToPx(56)
+    private val TITLEBAR_H get() = if (showTitle) dpToPx(52) else 0
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val settings = SettingsManager.get(this)
-        val STATUSBAR_H = dpToPx(24)
-        val NAVBAR_H = dpToPx(52)
-        val TITLEBAR_H = if (showTitle) dpToPx(48) else 0
+        // Edge-to-edge
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
+        val ctrl = WindowInsetsControllerCompat(window, window.decorView)
+        ctrl.hide(WindowInsetsCompat.Type.systemBars())
+        ctrl.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
 
+        val settings = SettingsManager.get(this)
         val root = FrameLayout(this)
         root.setBackgroundColor(Color.parseColor("#0D0D0F"))
 
-        // Тайтлбар застосунку
+        // Тайтлбар
         val titleBar = if (showTitle) {
             LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setBackgroundColor(Color.parseColor("#141417"))
+                setBackgroundColor(Color.parseColor("#12121A"))
                 setPadding(dpToPx(16), 0, dpToPx(16), 0)
 
-                titleView = TextView(this@BaseAppActivity).apply {
+                titleTextView = TextView(this@BaseAppActivity).apply {
                     text = appTitle
-                    textSize = 16f
+                    textSize = 17f
                     setTextColor(Color.parseColor("#F0F0F5"))
+                    letterSpacing = 0.02f
                 }
-                addView(titleView)
+                addView(titleTextView)
             }
         } else null
 
-        // Контент
         contentRoot = FrameLayout(this)
 
-        // Статус бар
-        val statusBar = StatusBarView(this)
-
-        // Навбар
-        val navbar = NavbarView(this).apply {
-            onBack = { onBackPressed() }
-            onHome = { navigateHome() }
-        }
-
-        // Компонування
-        val topMargin = (if (settings.statusbarVisible) STATUSBAR_H else 0) + TITLEBAR_H
-        val bottomMargin = if (settings.navbarVisible) NAVBAR_H else 0
-
+        val topOffset = STATUSBAR_H + TITLEBAR_H
         root.addView(contentRoot, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.MATCH_PARENT
-        ).also { it.topMargin = topMargin; it.bottomMargin = bottomMargin })
+        ).also { it.topMargin = topOffset; it.bottomMargin = NAVBAR_H })
 
-        if (settings.statusbarVisible) {
-            root.addView(statusBar, FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, STATUSBAR_H, Gravity.TOP
-            ))
-        }
+        root.addView(StatusBarView(this), FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, STATUSBAR_H, Gravity.TOP
+        ))
 
         titleBar?.let {
             root.addView(it, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, TITLEBAR_H, Gravity.TOP
-            ).also { lp -> lp.topMargin = if (settings.statusbarVisible) STATUSBAR_H else 0 })
+            ).also { lp -> lp.topMargin = STATUSBAR_H })
         }
 
-        if (settings.navbarVisible) {
-            root.addView(navbar, FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, NAVBAR_H, Gravity.BOTTOM
-            ))
-        }
+        root.addView(NavbarView(this).apply {
+            onBack = { onBackPressed() }
+            onHome = {
+                finishAffinity()
+                startActivity(packageManager.getLaunchIntentForPackage(packageName))
+            }
+        }, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, NAVBAR_H, Gravity.BOTTOM
+        ))
 
         setContentView(root)
         onContentReady()
@@ -98,19 +94,19 @@ abstract class BaseAppActivity : AppCompatActivity() {
 
     protected abstract fun onContentReady()
 
-    protected fun setTitle(title: String) {
-        if (::titleView.isInitialized) titleView.text = title
+    protected fun updateTitle(title: String) {
+        if (::titleTextView.isInitialized) titleTextView.text = title
     }
 
-    private fun navigateHome() {
-        finishAffinity()
-        startActivity(packageManager.getLaunchIntentForPackage(packageName))
+    override fun onResume() {
+        super.onResume()
+        val ctrl = WindowInsetsControllerCompat(window, window.decorView)
+        ctrl.hide(WindowInsetsCompat.Type.systemBars())
     }
 
     override fun finish() {
         super.finish()
-        if (SettingsManager.get(this).animations) {
+        if (SettingsManager.get(this).animations)
             overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
-        }
     }
 }
