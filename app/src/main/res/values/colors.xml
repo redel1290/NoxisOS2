@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="desktop_bg">#0D0D0F</color>
+    <color name="surface">#1A1A1F</color>
+    <color name="surface_variant">#141417</color>
+    <color name="transparent">#00000000</color>
+
+    <color name="noxis_accent">#7B5EA7</color>
+    <color name="noxis_accent_light">#9D7EC7</color>
+    <color name="noxis_accent_dim">#3D2F54</color>
+
+    <color name="text_primary">#F0F0F5</color>
+    <color name="text_secondary">#8A8A9A</color>
+    <color name="text_accent">#C8AAFF</color>
+
+    <color name="navbar_bg">#0F0F12</color>
+    <color name="statusbar_bg">#0D0D0F</color>
+    <color name="divider">#2A2A35</color>
+
+    <color name="icon_bg">#CC1E1E28</color>
+    <color name="icon_border">#2A2A35</color>
+
+    <color name="danger">#FF5F57</color>
+    <color name="warning">#FFBD2E</color>
+    <color name="success">#28C840</color>
+</resources>

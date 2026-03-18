@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.NoxisOS" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">@color/desktop_bg</item>
+        <item name="android:statusBarColor">@color/transparent</item>
+        <item name="android:navigationBarColor">@color/transparent</item>
+        <item name="android:windowFullscreen">false</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+        <item name="colorPrimary">@color/noxis_accent</item>
+        <item name="colorPrimaryDark">@color/desktop_bg</item>
+        <item name="colorAccent">@color/noxis_accent</item>
+    </style>
+
+    <style name="Theme.NoxisOS.Dialog" parent="Theme.AppCompat.Dialog">
+        <item name="android:windowBackground">@color/surface</item>
+        <item name="colorPrimary">@color/noxis_accent</item>
+        <item name="colorAccent">@color/noxis_accent</item>
+    </style>
+
+    <style name="Theme.NoxisOS.Fullscreen" parent="Theme.NoxisOS">
+        <item name="android:windowFullscreen">true</item>
+    </style>
+</resources>
