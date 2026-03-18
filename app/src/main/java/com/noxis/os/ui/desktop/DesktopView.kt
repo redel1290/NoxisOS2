@@ -261,7 +261,7 @@ class DesktopView(context: Context) : View(context) {
                     val dx = abs(event.x - (dragging?.drawX ?: event.x))
                     val dy = abs(event.y - (dragging?.drawY ?: event.y))
                     if (hypot(dx, dy) > context.dpToPx(8)) {
-                        cancelLongPress()
+                        cancelDragLongPress()
                     }
                 }
                 return true
@@ -270,7 +270,7 @@ class DesktopView(context: Context) : View(context) {
                 if (isDragging && dragging != null) {
                     dropIcon(dragging!!, dragCurrentX, dragCurrentY)
                 } else {
-                    cancelLongPress()
+                    cancelDragLongPress()
                     // Звичайний тап
                     val icon = findIconAt(event.x, event.y)
                     icon?.let { onAppClick?.invoke(it.app) }
@@ -278,7 +278,7 @@ class DesktopView(context: Context) : View(context) {
                 return true
             }
             MotionEvent.ACTION_CANCEL -> {
-                cancelLongPress()
+                cancelDragLongPress()
                 if (isDragging) dropIcon(dragging!!, dragging!!.drawX, dragging!!.drawY)
                 return true
             }
@@ -354,7 +354,7 @@ class DesktopView(context: Context) : View(context) {
         }
     }
 
-    private fun cancelLongPress() {
+    private fun cancelDragLongPress() {
         longPressRunnable?.let { handler.removeCallbacks(it) }
         longPressRunnable = null
     }

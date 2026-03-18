@@ -29,7 +29,7 @@ class NavbarView(context: Context) : View(context) {
         color = Color.parseColor("#CCFFFFFF")
         style = Paint.Style.FILL
         strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.StrokeJoin.ROUND
+        
     }
 
     private var pressedBtn = -1  // 0=back, 1=home, 2=recent
